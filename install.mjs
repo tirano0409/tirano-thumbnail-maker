@@ -2,7 +2,7 @@
 // 썸네일 제작기 설치: 이 폴더를 클로드 스킬로 등록하고, Codex CLI 설치·로그인 상태를 점검한다.
 // 사용: node install.mjs
 // 결과: 마지막 줄에 JSON({"ok":..., "skill":..., "codex":..., "login":..., "next":[...]}) 출력.
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,15 +23,34 @@ fs.mkdirSync(skillDir, { recursive: true });
 fs.writeFileSync(path.join(skillDir, "SKILL.md"), skill, "utf8");
 
 // 3) Codex CLI 설치·로그인 상태
-const run = (cmd) => { try { return execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); } catch (e) { return null; } };
-const codexVersion = run("codex --version");
+// codex는 상태 메시지를 stderr로 내보내므로 stdout·stderr를 모두 읽는다.
+const run = (cmd) => {
+  try {
+    const r = spawnSync(cmd, { shell: true, encoding: "utf8" });
+    if (r.status !== 0 && !r.stdout && !r.stderr) return null;
+    return `${r.stdout || ""}\n${r.stderr || ""}`.trim() || null;
+  } catch { return null; }
+};
+// 방금 npm으로 설치해 PATH가 아직 갱신되지 않은 경우를 대비해 npm 전역 폴더의 codex도 찾는다.
+let codexCmd = "codex";
+let codexVersion = run("codex --version");
+if (!codexVersion || /not recognized|not found|인식되지 않습니다/i.test(codexVersion)) {
+  codexVersion = null;
+  const prefix = run("npm prefix -g");
+  if (prefix) {
+    const p = prefix.split(/\r?\n/)[0].trim();
+    const cand = process.platform === "win32" ? path.join(p, "codex.cmd") : path.join(p, "bin", "codex");
+    if (fs.existsSync(cand)) { codexCmd = `"${cand}"`; codexVersion = run(`${codexCmd} --version`); }
+  }
+}
+if (codexVersion) codexVersion = (codexVersion.match(/codex-cli\s+\S+/) || [codexVersion.split(/\r?\n/)[0]])[0];
 let login = "unknown";
 if (!codexVersion) {
   next.push("Codex CLI가 없습니다. 'npm install -g @openai/codex'로 설치한 뒤 이 스크립트를 다시 실행하세요.");
 } else {
-  const status = run("codex login status") || "";
+  const status = run(`${codexCmd} login status`) || "";
   login = /logged in/i.test(status) ? "ok" : "needed";
-  if (login === "needed") next.push("사용자가 터미널에서 'codex login'을 직접 실행해 ChatGPT 계정(Plus 이상)으로 로그인해야 합니다.");
+  if (login === "needed") next.push(`사용자가 새 터미널에서 '${codexCmd} login'을 직접 실행해 ChatGPT 계정(Plus 이상)으로 로그인해야 합니다. (방금 설치했다면 열려 있던 터미널은 codex를 못 찾을 수 있으니 새 터미널을 엽니다.)`);
 }
 
 // 4) 브랜드 상태
