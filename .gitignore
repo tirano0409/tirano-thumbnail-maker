@@ -1,0 +1,5 @@
+output/
+brands/*
+!brands/_템플릿/
+dist/
+*.log
